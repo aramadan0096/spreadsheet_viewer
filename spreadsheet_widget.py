@@ -51,6 +51,7 @@ class CellReorderDialog(QDialog):
     def __init__(self, cell_data, parent=None):
         super().__init__(parent)
         self.cell_data = cell_data
+        self.original_order = list(range(len(cell_data)))  # Keep track of original indices
         self.init_ui()
         
     def init_ui(self):
@@ -86,8 +87,7 @@ class CellReorderDialog(QDialog):
         """Get the reordered cell data."""
         reordered_data = []
         for i in range(self.list_widget.count()):
-            item = self.list_widget.item(i)
-            original_index = self.cell_data[i][0]  # This needs to be tracked properly
+            original_index = self.original_order[i]  # Get the original index
             reordered_data.append(self.cell_data[original_index])
         return reordered_data
 
@@ -101,14 +101,15 @@ class SpreadsheetWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.styling_data = None
+        # Column definitions - only define static properties here
         self.special_columns = {
-            '@Content Style': {'type': 'content', 'col': 4, 'styles': []},
-            '@Page Style': {'type': 'page', 'col': 7, 'styles': []},
-            '@Break Harmonization': {'type': 'harmonization', 'col': 5, 'values': ['', 'OFF', 'ACROSS_BLOCKS']},
-            '@Spine Position': {'type': 'spine', 'col': 6, 'values': ['', 'BODY_CENTER', 'HEAD_GAP_CENTER', 'BODY_LEFT', 'BODY_RIGHT']},
-            '@Vertical Gap': {'type': 'gap', 'col': 3, 'values': ['', '0', '12', '24', '32', '48']},
-            '@Page Runtime': {'type': 'runtime', 'col': 8, 'values': ['', '24', '48', '72', '96', '120']},
-            '@Page Gap': {'type': 'gap', 'col': 9, 'values': ['', '0', '12', '24', '32', '48']}
+            '@Content Style': {'type': 'content', 'col': 4},
+            '@Page Style': {'type': 'page', 'col': 7},
+            '@Break Harmonization': {'type': 'harmonization', 'col': 5},
+            '@Spine Position': {'type': 'spine', 'col': 6},
+            '@Vertical Gap': {'type': 'gap', 'col': 3},
+            '@Page Runtime': {'type': 'runtime', 'col': 8},
+            '@Page Gap': {'type': 'gap', 'col': 9}
         }
         
         self.init_ui()
@@ -240,18 +241,25 @@ class SpreadsheetWidget(QWidget):
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.NoInsert)
         
-        column_info = self.special_columns[column_name]
-        style_type = column_info['type']
+        items = ['']  # Always start with an empty option
         
-        if style_type == 'content' and self.styling_data:
-            items = [''] + self.styling_data.get('content_styles', [])
-            combo.addItems(items)
-        elif style_type == 'page' and self.styling_data:
-            items = [''] + self.styling_data.get('page_styles', [])
-            combo.addItems(items)
-        elif 'values' in column_info:
-            combo.addItems(column_info['values'])
+        if self.styling_data:
+            style_type = self.special_columns[column_name]['type']
             
+            if style_type == 'content':
+                items.extend(self.styling_data.get('content_styles', []))
+            elif style_type == 'page':
+                items.extend(self.styling_data.get('page_styles', []))
+            elif style_type == 'harmonization':
+                items.extend(self.styling_data.get('harmonization_values', []))
+            elif style_type == 'spine':
+                items.extend(self.styling_data.get('spine_positions', []))
+            elif style_type == 'gap':
+                items.extend(self.styling_data.get('gaps', []))
+            elif style_type == 'runtime':
+                items.extend(self.styling_data.get('runtimes', []))
+                
+        combo.addItems(items)
         combo.currentTextChanged.connect(self.on_combo_changed)
         return combo
 
@@ -312,17 +320,30 @@ class SpreadsheetWidget(QWidget):
         if not selected:
             QMessageBox.information(self, "Info", "No cells selected to reorder.")
             return
+            
         # Collect selected cell data
         cell_data = []
         for idx in selected:
-            value = self.table.item(idx.row(), idx.column()).text() if self.table.item(idx.row(), idx.column()) else ""
-            cell_data.append((idx.row(), idx.column(), value))
-        # Show dialog
+            row, col = idx.row(), idx.column()
+            # Get value based on whether it's a combo box or regular cell
+            widget = self.table.cellWidget(row, col)
+            if isinstance(widget, QComboBox):
+                value = widget.currentText()
+            else:
+                item = self.table.item(row, col)
+                value = item.text() if item else ""
+            cell_data.append((row, col, value))
+            
+        # Show reorder dialog
         dialog = CellReorderDialog(cell_data, self)
         if dialog.exec_() == QDialog.Accepted:
             reordered = dialog.get_reordered_data()
-            for i, (row, col, value) in enumerate(reordered):
+            # Apply the reordered values
+            for old_data, (row, col, _) in zip(reordered, cell_data):
+                old_row, old_col, value = old_data
+                # Set the cell value, preserving the widget type (combo or regular)
                 self.set_cell_value(row, col, value)
+                
         self.data_changed.emit()
 
     def on_combo_changed(self, value):
