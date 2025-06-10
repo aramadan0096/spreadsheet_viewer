@@ -182,22 +182,27 @@ class CredGenMainWindow(QMainWindow):
     #     # refresh_btn = toolbar.addAction('Refresh')
     #     # refresh_btn.triggered.connect(self.refresh_styling)
         
-    def create_main_content(self, parent_layout):
+    def create_main_content(self, layout):
         """Create the main content area."""
-        # Create splitter for resizable panels
+        # Create a splitter for spreadsheet and info panel
         splitter = QSplitter(Qt.Horizontal)
-        parent_layout.addWidget(splitter)
         
         # Create spreadsheet widget
         self.spreadsheet_widget = SpreadsheetWidget()
-        splitter.addWidget(self.spreadsheet_widget)
-        
+        if self.styling_data:
+            self.spreadsheet_widget.update_styling_data(self.styling_data)
+            
         # Create info panel
-        info_panel = self.create_info_panel()
-        splitter.addWidget(info_panel)
+        self.info_panel = self.create_info_panel()
         
-        # Set splitter proportions
-        splitter.setSizes([1000, 400])
+        # Add widgets to splitter
+        splitter.addWidget(self.spreadsheet_widget)
+        splitter.addWidget(self.info_panel)
+        
+        # Set initial sizes
+        splitter.setSizes([800, 200])
+        
+        layout.addWidget(splitter)
         
     def create_info_panel(self):
         """Create the information panel."""
@@ -267,33 +272,68 @@ class CredGenMainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to create new project: {str(e)}")
             
     def open_project(self):
-        """Open an existing project."""
-        try:
-            project_dir = QFileDialog.getExistingDirectory(
-                self, "Select Project Directory", 
-                os.path.expanduser("~")
-            )
+        """Open a project folder containing Credits.csv and Styling.toml files."""
+        folder_path = QFileDialog.getExistingDirectory(
+            self,
+            "Open Project Folder",
+            "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+        
+        if folder_path:
+            # Convert to Path object for easier path manipulation
+            folder = Path(folder_path)
             
-            if not project_dir:
+            # Check for required files
+            credits_file = folder / 'Credits.csv'
+            styling_file = folder / 'Styling.toml'
+            
+            if not credits_file.exists():
+                QMessageBox.critical(
+                    self,
+                    "Invalid Project Folder",
+                    f"Credits.csv not found in {folder_path}"
+                )
                 return
                 
-            # Look for CSV and TOML files
-            csv_files = list(Path(project_dir).glob("*.csv"))
-            toml_files = list(Path(project_dir).glob("*.toml"))
-            
-            if not csv_files:
-                QMessageBox.warning(self, "Warning", "No CSV files found in the selected directory")
+            if not styling_file.exists():
+                QMessageBox.critical(
+                    self,
+                    "Invalid Project Folder",
+                    f"Styling.toml not found in {folder_path}"
+                )
                 return
                 
-            # Use first CSV file found
-            csv_file = csv_files[0]
-            toml_file = toml_files[0] if toml_files else None
-            
-            self.load_project(str(csv_file), str(toml_file) if toml_file else None)
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open project: {str(e)}")
-            
+            try:
+                # Load styling data first
+                self.styling_data = self.styling_parser.parse_styling_file(str(styling_file))
+                if not self.styling_data:
+                    QMessageBox.critical(self, "Error", "Failed to parse Styling.toml")
+                    return
+                    
+                self.current_styling_file = str(styling_file)
+                
+                # Update styling data in spreadsheet widget
+                self.spreadsheet_widget.update_styling_data(self.styling_data)
+                self.update_info_panel(self.styling_data)
+                
+                # Load the CSV data
+                csv_data = self.file_manager.load_csv(str(credits_file))
+                if not csv_data:
+                    QMessageBox.critical(self, "Error", "Credits.csv is empty or could not be read")
+                    return
+                    
+                self.current_csv_file = str(credits_file)
+                self.spreadsheet_widget.load_data(csv_data, self.styling_data)
+                
+                # Update window title and status
+                self.update_window_title()
+                self.statusBar().showMessage(f"Loaded project from: {folder_path}")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to open project: {str(e)}")
+                return
+
     def load_project(self, csv_file_path, styling_file_path=None):
         """Load a project from files."""
         try:

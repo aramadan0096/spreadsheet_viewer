@@ -29,15 +29,20 @@ class StyleComboBox(QComboBox):
         if not styling_data:
             return
             
-        if self.style_type == "page" and "page_styles" in styling_data:
-            for style in styling_data["page_styles"]:
-                self.addItem(style)
-        elif self.style_type == "content" and "content_styles" in styling_data:
-            for style in styling_data["content_styles"]:
-                self.addItem(style)
-        elif self.style_type == "letter" and "letter_styles" in styling_data:
-            for style in styling_data["letter_styles"]:
-                self.addItem(style)
+        if self.style_type == "page" and "pageStyle" in styling_data:
+            for style in styling_data["pageStyle"]:
+                if "name" in style:
+                    self.addItem(style["name"])
+                    
+        elif self.style_type == "content" and "contentStyle" in styling_data:
+            for style in styling_data["contentStyle"]:
+                if "name" in style:
+                    self.addItem(style["name"])
+                    
+        elif self.style_type == "letter" and "letterStyle" in styling_data:
+            for style in styling_data["letterStyle"]:
+                if "name" in style:
+                    self.addItem(style["name"])
 
 
 class CellReorderDialog(QDialog):
@@ -97,12 +102,13 @@ class SpreadsheetWidget(QWidget):
         super().__init__(parent)
         self.styling_data = None
         self.special_columns = {
-            '@Content Style': 4,
-            '@Page Style': 7,
-            '@Break Harmonization': 5,
-            '@Spine Position': 6,
-            '@Page Runtime': 8,
-            '@Page Gap': 9
+            '@Content Style': {'type': 'content', 'col': 4, 'styles': []},
+            '@Page Style': {'type': 'page', 'col': 7, 'styles': []},
+            '@Break Harmonization': {'type': 'harmonization', 'col': 5, 'values': ['', 'OFF', 'ACROSS_BLOCKS']},
+            '@Spine Position': {'type': 'spine', 'col': 6, 'values': ['', 'BODY_CENTER', 'HEAD_GAP_CENTER', 'BODY_LEFT', 'BODY_RIGHT']},
+            '@Vertical Gap': {'type': 'gap', 'col': 3, 'values': ['', '0', '12', '24', '32', '48']},
+            '@Page Runtime': {'type': 'runtime', 'col': 8, 'values': ['', '24', '48', '72', '96', '120']},
+            '@Page Gap': {'type': 'gap', 'col': 9, 'values': ['', '0', '12', '24', '32', '48']}
         }
         
         self.init_ui()
@@ -157,30 +163,57 @@ class SpreadsheetWidget(QWidget):
         
     def load_data(self, csv_data, styling_data=None):
         """Load CSV data into the table."""
-        self.styling_data = styling_data
+        print(f"Loading data into spreadsheet. Received {len(csv_data) if csv_data else 0} rows")
+        self.styling_data = styling_data or {}
 
         if not csv_data:
+            print("No CSV data provided")
             return
 
-        # Set table dimensions
-        self.table.setRowCount(len(csv_data))
-        self.table.setColumnCount(len(csv_data[0]) if csv_data else 0)
+        # Block signals temporarily to prevent unnecessary updates
+        self.table.blockSignals(True)
 
-        # Set headers if first row contains headers
-        if csv_data and csv_data[0] and str(csv_data[0][0]).startswith('@'):
-            headers = csv_data[0]
-            self.table.setHorizontalHeaderLabels(headers)
-            data_rows = csv_data[1:]
-        else:
-            data_rows = csv_data
+        try:
+            # Set table dimensions
+            self.table.setRowCount(len(csv_data))
+            self.table.setColumnCount(len(csv_data[0]) if csv_data else 0)
+            print(f"Set table dimensions: {len(csv_data)} rows x {len(csv_data[0]) if csv_data else 0} columns")
 
-        # Populate table
-        for row_idx, row_data in enumerate(data_rows):
-            for col_idx, cell_value in enumerate(row_data):
-                self.set_cell_value(row_idx, col_idx, cell_value)
+            # Set headers if first row contains headers
+            if csv_data and csv_data[0] and str(csv_data[0][0]).startswith('@'):
+                headers = csv_data[0]
+                print(f"Setting headers: {headers}")
+                self.table.setHorizontalHeaderLabels(headers)
+                data_rows = csv_data[1:]
+            else:
+                print("No headers found, using all rows as data")
+                data_rows = csv_data
 
-        # Setup special columns with dropdowns
-        self.setup_special_columns()
+            # Populate table
+            print(f"Populating {len(data_rows)} data rows")
+            for row_idx, row_data in enumerate(data_rows):
+                for col_idx, cell_value in enumerate(row_data):
+                    header_item = self.table.horizontalHeaderItem(col_idx)
+                    if header_item:
+                        column_name = header_item.text()
+                        if column_name in self.special_columns:
+                            # Create combo box for special columns
+                            combo = self.create_style_combo(column_name)
+                            # Set the current value
+                            index = combo.findText(str(cell_value))
+                            if index >= 0:
+                                combo.setCurrentIndex(index)
+                            self.table.setCellWidget(row_idx, col_idx, combo)
+                        else:
+                            item = QTableWidgetItem(str(cell_value))
+                            self.table.setItem(row_idx, col_idx, item)
+
+        except Exception as e:
+            print(f"Error loading data into spreadsheet: {str(e)}")
+            raise
+        finally:
+            # Re-enable signals
+            self.table.blockSignals(False)
 
         # Resize columns to content
         self.table.resizeColumnsToContents()
@@ -193,57 +226,70 @@ class SpreadsheetWidget(QWidget):
         # Check if this is a special styling column
         if column_name in self.special_columns:
             combo = self.create_style_combo(column_name)
-            combo.setCurrentText(str(value))
+            current_index = combo.findText(str(value))
+            if current_index >= 0:
+                combo.setCurrentIndex(current_index)
             self.table.setCellWidget(row, col, combo)
         else:
-            item = QTableWidgetItem(str(value))
-            # Apply special formatting for header rows
-            if str(value).startswith('@'):
-                font = QFont()
-                font.setBold(True)
-                item.setFont(font)
+            item = QTableWidgetItem(str(value) if value is not None else "")
             self.table.setItem(row, col, item)
 
     def create_style_combo(self, column_name):
         """Create a style combo box for the specified column."""
-        if column_name == '@Content Style':
-            combo = StyleComboBox('content')
-        elif column_name == '@Page Style':
-            combo = StyleComboBox('page')
-        elif column_name == '@Letter Style':
-            combo = StyleComboBox('letter')
-        else:
-            combo = StyleComboBox('content')  # Default
-        combo.update_styles(self.styling_data)
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.NoInsert)
+        
+        column_info = self.special_columns[column_name]
+        style_type = column_info['type']
+        
+        if style_type == 'content' and self.styling_data:
+            items = [''] + self.styling_data.get('content_styles', [])
+            combo.addItems(items)
+        elif style_type == 'page' and self.styling_data:
+            items = [''] + self.styling_data.get('page_styles', [])
+            combo.addItems(items)
+        elif 'values' in column_info:
+            combo.addItems(column_info['values'])
+            
         combo.currentTextChanged.connect(self.on_combo_changed)
         return combo
 
     def setup_special_columns(self):
         """Setup special columns with appropriate widgets."""
-        if not self.styling_data:
-            return
         for col in range(self.table.columnCount()):
             header_text = self.table.horizontalHeaderItem(col)
-            column_name = header_text.text() if header_text else ""
-            if column_name in self.special_columns:
+            if header_text and header_text.text() in self.special_columns:
+                # Set up dropdown for each row in this column
                 for row in range(self.table.rowCount()):
-                    value = self.table.item(row, col).text() if self.table.item(row, col) else ""
-                    combo = self.create_style_combo(column_name)
-                    combo.setCurrentText(value)
-                    self.table.setCellWidget(row, col, combo)
-
+                    existing_value = ""
+                    existing_item = self.table.item(row, col)
+                    if existing_item:
+                        existing_value = existing_item.text()
+                    self.set_cell_value(row, col, existing_value)
+                    
     def update_styling_data(self, styling_data):
         """Update styling data and refresh dropdowns."""
         self.styling_data = styling_data
+        
         # Update all existing combo boxes
         for col in range(self.table.columnCount()):
-            header_text = self.table.horizontalHeaderItem(col)
-            column_name = header_text.text() if header_text else ""
-            if column_name in self.special_columns:
-                for row in range(self.table.rowCount()):
-                    widget = self.table.cellWidget(row, col)
-                    if isinstance(widget, StyleComboBox):
-                        widget.update_styles(styling_data)
+            header_item = self.table.horizontalHeaderItem(col)
+            if header_item:
+                column_name = header_item.text()
+                if column_name in self.special_columns:
+                    # Update combo boxes for each row in this column
+                    for row in range(self.table.rowCount()):
+                        widget = self.table.cellWidget(row, col)
+                        if isinstance(widget, QComboBox):
+                            current_value = widget.currentText()
+                            # Create new combo with updated data
+                            new_combo = self.create_style_combo(column_name)
+                            # Try to restore the previous value
+                            index = new_combo.findText(current_value)
+                            if index >= 0:
+                                new_combo.setCurrentIndex(index)
+                            self.table.setCellWidget(row, col, new_combo)
 
     def get_csv_data(self):
         """Get current table data as CSV-compatible list."""
@@ -303,25 +349,16 @@ class SpreadsheetWidget(QWidget):
         current_row_count = self.table.rowCount()
         self.table.insertRow(current_row_count)
         
-        # Copy formatting and data from the last row if available
-        if current_row_count > 0:
-            for col in range(self.table.columnCount()):
-                # Copy item
-                item = self.table.item(current_row_count - 1, col)
-                if item:
-                    new_item = QTableWidgetItem(item)
-                    new_item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make non-editable
-                    self.table.setItem(current_row_count, col, new_item)
-                
-                # Copy combo box
-                widget = self.table.cellWidget(current_row_count - 1, col)
-                if isinstance(widget, QComboBox):
-                    combo = QComboBox()
-                    combo.addItems([widget.itemText(i) for i in range(widget.count())])
-                    combo.setCurrentText(widget.currentText())
-                    combo.setEditable(True)
-                    combo.setInsertPolicy(QComboBox.NoInsert)
+        for col in range(self.table.columnCount()):
+            header_item = self.table.horizontalHeaderItem(col)
+            if header_item:
+                column_name = header_item.text()
+                if column_name in self.special_columns:
+                    # Create combo box for special columns
+                    combo = self.create_style_combo(column_name)
                     self.table.setCellWidget(current_row_count, col, combo)
+                else:
+                    self.table.setItem(current_row_count, col, QTableWidgetItem(""))
         
         self.data_changed.emit()
         
