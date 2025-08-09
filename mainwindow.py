@@ -2,6 +2,8 @@
 """
 CredGen Spreadsheet Editor
 A PyQt application for editing CredGen spreadsheet files with enhanced styling support.
+
+Performance note: for large CSVs, consider virtualized table views in the future.
 """
 
 import sys
@@ -19,15 +21,23 @@ from PyQt5.QtGui import QIcon, QKeySequence, QFont
 from spreadsheet_widget import SpreadsheetWidget
 from styling_parser import StylingParser
 from file_manager import FileManager
+from widgets.info_panel import InfoPanel
+from widgets.menu_bar import MenuBar
+from controller import CredGenController
 
 
 class CredGenMainWindow(QMainWindow):
-    """Main application window for CredGen Spreadsheet Editor."""
+    """
+    Main application window for CredGen Spreadsheet Editor.
+    Coordinates UI, delegates data logic to controller, and manages user interactions.
+    Extensible via controller plugins for new style types/features.
+    """
     
     def __init__(self):
         super().__init__()
-        self.file_manager = FileManager()
-        self.styling_parser = StylingParser()
+        self.controller = CredGenController()
+        self.file_manager = self.controller.file_manager
+        self.styling_parser = self.controller.styling_parser
         self.current_csv_file = None
         self.current_styling_file = None
         self.styling_data = None
@@ -43,114 +53,50 @@ class CredGenMainWindow(QMainWindow):
             self.update_info_panel(self.styling_data)
             self.spreadsheet_widget.update_styling_data(self.styling_data)
         
-    def init_ui(self):
-        """Initialize the user interface."""
+    def init_ui(self) -> None:
+        """Initialize the user interface. (Accessibility: add tooltips, ensure tab order, and add keyboard shortcuts.)"""
         self.setWindowTitle("CredGen Spreadsheet Editor")
         self.setGeometry(100, 100, 1400, 800)
-        
-        # Set application icon (if available)
         self.setWindowIcon(QIcon("icons/app_icon.png"))
-        
-        # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        # Create main layout
         main_layout = QVBoxLayout(central_widget)
-        
-        # Create toolbar
-        # self.create_toolbar()
-        
-        # Create menu bar
         self.create_menu_bar()
-        
-        # Create main content area
         self.create_main_content(main_layout)
-        
-        # Create status bar
         self.create_status_bar()
+        # Accessibility: set tab order (spreadsheet first, then info panel)
+        self.setTabOrder(self.spreadsheet_widget, self.info_panel)
+        # Add tooltips to main widgets
+        self.spreadsheet_widget.setToolTip("Edit credits spreadsheet here")
+        self.info_panel.setToolTip("Reference for available styles")
         
-    def create_menu_bar(self):
-        """Create the application menu bar."""
-        menubar = self.menuBar()
-        
-        # File menu
-        file_menu = menubar.addMenu('&File')
-        
-        # # New project
-        # new_action = file_menu.addAction('&New Project')
-        # new_action.setShortcut(QKeySequence.New)
-        # new_action.triggered.connect(self.new_project)
-        
-        # Open project
-        open_action = file_menu.addAction('&Open Project')
-        open_action.setShortcut(QKeySequence.Open)
-        open_action.triggered.connect(self.open_project)
-        
-        file_menu.addSeparator()
-        
-        # Save
-        save_action = file_menu.addAction('&Save')
-        save_action.setShortcut(QKeySequence.Save)
-        save_action.triggered.connect(self.save_project)
-        
-        # # Save As
-        # save_as_action = file_menu.addAction('Save &As...')
-        # save_as_action.setShortcut(QKeySequence.SaveAs)
-        # save_as_action.triggered.connect(self.save_as_project)
-        
-        file_menu.addSeparator()
-        
-        # Exit
-        exit_action = file_menu.addAction('E&xit')
-        exit_action.setShortcut(QKeySequence.Quit)
-        exit_action.triggered.connect(self.close)
-        
-        # Edit menu
-        edit_menu = menubar.addMenu('&Edit')
-        
-        # Undo/Redo
-        undo_action = edit_menu.addAction('&Undo')
-        undo_action.setShortcut(QKeySequence.Undo)
-        undo_action.triggered.connect(self.undo)
-        
-        redo_action = edit_menu.addAction('&Redo')
-        redo_action.setShortcut(QKeySequence.Redo)
-        redo_action.triggered.connect(self.redo)
-        
-        edit_menu.addSeparator()
-        
-        # Cut/Copy/Paste
-        cut_action = edit_menu.addAction('Cu&t')
-        cut_action.setShortcut(QKeySequence.Cut)
-        cut_action.triggered.connect(self.cut)
-        
-        copy_action = edit_menu.addAction('&Copy')
-        copy_action.setShortcut(QKeySequence.Copy)
-        copy_action.triggered.connect(self.copy)
-        
-        paste_action = edit_menu.addAction('&Paste')
-        paste_action.setShortcut(QKeySequence.Paste)
-        paste_action.triggered.connect(self.paste)
-        
-        # Tools menu
-        tools_menu = menubar.addMenu('&Tools')
-        
-        # Reorder cells
-        reorder_action = tools_menu.addAction('&Reorder Selected Cells')
-        reorder_action.setShortcut('Ctrl+R')
-        reorder_action.triggered.connect(self.reorder_cells)
-        
-        # Refresh styling
-        refresh_styling_action = tools_menu.addAction('Refresh &Styling Data')
-        refresh_styling_action.setShortcut('F5')
-        refresh_styling_action.triggered.connect(self.refresh_styling)
-        
-        # Help menu
-        help_menu = menubar.addMenu('&Help')
-        
-        about_action = help_menu.addAction('&About')
-        about_action.triggered.connect(self.show_about)
+    def create_menu_bar(self) -> None:
+        """Create the application menu bar. (Accessibility: keyboard shortcuts are set in MenuBar.)"""
+        self.menubar = MenuBar(self)
+        self.setMenuBar(self.menubar)
+        self.menubar.actions['open'].setToolTip("Open a CredGen project folder")
+        self.menubar.actions['save'].setToolTip("Save the current project")
+        self.menubar.actions['exit'].setToolTip("Exit the application")
+        self.menubar.actions['undo'].setToolTip("Undo last action")
+        self.menubar.actions['redo'].setToolTip("Redo last undone action")
+        self.menubar.actions['cut'].setToolTip("Cut selected cells")
+        self.menubar.actions['copy'].setToolTip("Copy selected cells")
+        self.menubar.actions['paste'].setToolTip("Paste cells from clipboard")
+        self.menubar.actions['reorder'].setToolTip("Reorder selected cells")
+        self.menubar.actions['refresh_styling'].setToolTip("Refresh styling data from TOML")
+        self.menubar.actions['about'].setToolTip("About this application")
+        # Connect actions to methods
+        self.menubar.actions['open'].triggered.connect(self.open_project)
+        self.menubar.actions['save'].triggered.connect(self.save_project)
+        self.menubar.actions['exit'].triggered.connect(self.close)
+        self.menubar.actions['undo'].triggered.connect(self.undo)
+        self.menubar.actions['redo'].triggered.connect(self.redo)
+        self.menubar.actions['cut'].triggered.connect(self.cut)
+        self.menubar.actions['copy'].triggered.connect(self.copy)
+        self.menubar.actions['paste'].triggered.connect(self.paste)
+        self.menubar.actions['reorder'].triggered.connect(self.reorder_cells)
+        self.menubar.actions['refresh_styling'].triggered.connect(self.refresh_styling)
+        self.menubar.actions['about'].triggered.connect(self.show_about)
         
     # def create_toolbar(self):
     #     """Create the application toolbar."""
@@ -184,7 +130,6 @@ class CredGenMainWindow(QMainWindow):
         
     def create_main_content(self, layout):
         """Create the main content area."""
-        # Create a splitter for spreadsheet and info panel
         splitter = QSplitter(Qt.Horizontal)
         
         # Create spreadsheet widget
@@ -192,8 +137,8 @@ class CredGenMainWindow(QMainWindow):
         if self.styling_data:
             self.spreadsheet_widget.update_styling_data(self.styling_data)
             
-        # Create info panel
-        self.info_panel = self.create_info_panel()
+        # Use InfoPanel widget
+        self.info_panel = InfoPanel()
         
         # Add widgets to splitter
         splitter.addWidget(self.spreadsheet_widget)
@@ -203,43 +148,6 @@ class CredGenMainWindow(QMainWindow):
         splitter.setSizes([800, 200])
         
         layout.addWidget(splitter)
-        
-    def create_info_panel(self):
-        """Create the information panel."""
-        info_widget = QWidget()
-        info_layout = QVBoxLayout(info_widget)
-        
-        # Title
-        title_label = QLabel("Styling Information")
-        title_label.setFont(QFont("Arial", 12, QFont.Bold))
-        info_layout.addWidget(title_label)
-        
-        # Tab widget for different info types
-        info_tabs = QTabWidget()
-        info_layout.addWidget(info_tabs)
-        
-        # Page Styles tab
-        page_styles_widget = QWidget()
-        page_styles_layout = QVBoxLayout(page_styles_widget)
-        self.page_styles_label = QLabel("No styling file loaded")
-        page_styles_layout.addWidget(self.page_styles_label)
-        info_tabs.addTab(page_styles_widget, "Page Styles")
-        
-        # Content Styles tab
-        content_styles_widget = QWidget()
-        content_styles_layout = QVBoxLayout(content_styles_widget)
-        self.content_styles_label = QLabel("No styling file loaded")
-        content_styles_layout.addWidget(self.content_styles_label)
-        info_tabs.addTab(content_styles_widget, "Content Styles")
-        
-        # Letter Styles tab
-        letter_styles_widget = QWidget()
-        letter_styles_layout = QVBoxLayout(letter_styles_widget)
-        self.letter_styles_label = QLabel("No styling file loaded")
-        letter_styles_layout.addWidget(self.letter_styles_label)
-        info_tabs.addTab(letter_styles_widget, "Letter Styles")
-        
-        return info_widget
         
     def create_status_bar(self):
         """Create the status bar."""
@@ -271,7 +179,7 @@ class CredGenMainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create new project: {str(e)}")
             
-    def open_project(self):
+    def open_project(self) -> None:
         """Open a project folder containing Credits.csv and Styling.toml files."""
         folder_path = QFileDialog.getExistingDirectory(
             self,
@@ -279,15 +187,10 @@ class CredGenMainWindow(QMainWindow):
             "",
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
         )
-        
         if folder_path:
-            # Convert to Path object for easier path manipulation
             folder = Path(folder_path)
-            
-            # Check for required files
             credits_file = folder / 'Credits.csv'
             styling_file = folder / 'Styling.toml'
-            
             if not credits_file.exists():
                 QMessageBox.critical(
                     self,
@@ -295,7 +198,6 @@ class CredGenMainWindow(QMainWindow):
                     f"Credits.csv not found in {folder_path}"
                 )
                 return
-                
             if not styling_file.exists():
                 QMessageBox.critical(
                     self,
@@ -303,33 +205,19 @@ class CredGenMainWindow(QMainWindow):
                     f"Styling.toml not found in {folder_path}"
                 )
                 return
-                
             try:
-                # Load styling data first
-                self.styling_data = self.styling_parser.parse_styling_file(str(styling_file))
-                if not self.styling_data:
-                    QMessageBox.critical(self, "Error", "Failed to parse Styling.toml")
-                    return
-                    
-                self.current_styling_file = str(styling_file)
-                
-                # Update styling data in spreadsheet widget
-                self.spreadsheet_widget.update_styling_data(self.styling_data)
-                self.update_info_panel(self.styling_data)
-                
-                # Load the CSV data
-                csv_data = self.file_manager.load_csv(str(credits_file))
-                if not csv_data:
-                    QMessageBox.critical(self, "Error", "Credits.csv is empty or could not be read")
-                    return
-                    
+                csv_data, styling_data = self.controller.load_project(str(credits_file), str(styling_file))
                 self.current_csv_file = str(credits_file)
-                self.spreadsheet_widget.load_data(csv_data, self.styling_data)
-                
-                # Update window title and status
+                self.current_styling_file = str(styling_file)
+                self.styling_data = styling_data
+                self.spreadsheet_widget.update_styling_data(styling_data)
+                self.update_info_panel(styling_data)
+                self.spreadsheet_widget.load_data(csv_data, styling_data)
                 self.update_window_title()
                 self.statusBar().showMessage(f"Loaded project from: {folder_path}")
-                
+            except ValueError as e:
+                QMessageBox.critical(self, "Error", str(e))
+                return
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open project: {str(e)}")
                 return
@@ -361,25 +249,22 @@ class CredGenMainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load project: {str(e)}")
             
-    def save_project(self):
+    def save_project(self) -> None:
         """Save the current project."""
         if not self.current_csv_file:
             self.save_as_project()
             return
-            
         try:
-            # Get data from spreadsheet widget
             csv_data = self.spreadsheet_widget.get_csv_data()
-            
-            # Save CSV file
-            self.file_manager.save_csv(self.current_csv_file, csv_data)
-            
+            if not self.controller.validate_csv(csv_data):
+                QMessageBox.critical(self, "Error", "CSV data is invalid.")
+                return
+            self.controller.save_project(self.current_csv_file, csv_data)
             self.status_bar.showMessage("Project saved successfully")
-            
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save project: {str(e)}")
             
-    def save_as_project(self):
+    def save_as_project(self) -> None:
         """Save the project with a new name."""
         try:
             file_path, _ = QFileDialog.getSaveFileName(
@@ -387,45 +272,22 @@ class CredGenMainWindow(QMainWindow):
                 os.path.expanduser("~/Credits.csv"),
                 "CSV Files (*.csv);;All Files (*)"
             )
-            
             if not file_path:
                 return
-                
-            # Get data from spreadsheet widget
             csv_data = self.spreadsheet_widget.get_csv_data()
-            
-            # Save CSV file
-            self.file_manager.save_csv(file_path, csv_data)
+            if not self.controller.validate_csv(csv_data):
+                QMessageBox.critical(self, "Error", "CSV data is invalid.")
+                return
+            self.controller.save_project(file_path, csv_data)
             self.current_csv_file = file_path
-            
             self.status_bar.showMessage("Project saved successfully")
             self.update_window_title()
-            
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save project: {str(e)}")
             
     def update_info_panel(self, styling_data):
         """Update the information panel with styling data."""
-        if not styling_data:
-            self.page_styles_label.setText("No styling file loaded")
-            self.content_styles_label.setText("No styling file loaded")
-            self.letter_styles_label.setText("No styling file loaded")
-            return
-            
-        # Update page styles
-        page_styles = styling_data.get('page_styles', [])
-        page_text = "Available Page Styles:\n" + "\n".join([f"• {style}" for style in page_styles])
-        self.page_styles_label.setText(page_text)
-        
-        # Update content styles
-        content_styles = styling_data.get('content_styles', [])
-        content_text = "Available Content Styles:\n" + "\n".join([f"• {style}" for style in content_styles])
-        self.content_styles_label.setText(content_text)
-        
-        # Update letter styles
-        letter_styles = styling_data.get('letter_styles', [])
-        letter_text = "Available Letter Styles:\n" + "\n".join([f"• {style}" for style in letter_styles])
-        self.letter_styles_label.setText(letter_text)
+        self.info_panel.update_info(styling_data)
         
     def update_window_title(self):
         """Update the window title with current file info."""
@@ -455,22 +317,35 @@ class CredGenMainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to refresh styling data: {str(e)}")
             
-    def on_data_changed(self):
+    def undo(self) -> None:
+        """Undo last action."""
+        prev_state = self.controller.undo()
+        if prev_state:
+            self.spreadsheet_widget.load_data(prev_state, self.styling_data)
+            self.status_bar.showMessage("Undo performed")
+        else:
+            self.status_bar.showMessage("Nothing to undo")
+
+    def redo(self) -> None:
+        """Redo last undone action."""
+        next_state = self.controller.redo()
+        if next_state:
+            self.spreadsheet_widget.load_data(next_state, self.styling_data)
+            self.status_bar.showMessage("Redo performed")
+        else:
+            self.status_bar.showMessage("Nothing to redo")
+
+    def on_data_changed(self) -> None:
         """Handle data change in spreadsheet."""
+        # Push new state to undo stack
+        state = self.spreadsheet_widget.get_csv_data()
+        self.controller.push_undo(state)
         self.status_bar.showMessage("Data modified")
         
     def on_selection_changed(self):
         """Handle selection change in spreadsheet."""
         selection_info = self.spreadsheet_widget.get_selection_info()
         self.status_bar.showMessage(f"Selected: {selection_info}")
-        
-    def undo(self):
-        """Undo last action."""
-        self.spreadsheet_widget.undo()
-        
-    def redo(self):
-        """Redo last undone action."""
-        self.spreadsheet_widget.redo()
         
     def cut(self):
         """Cut selected cells."""

@@ -10,90 +10,15 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
 from PyQt5.QtGui import QColor, QFont, QDrag, QPalette
-
-
-class StyleComboBox(QComboBox):
-    """Custom combo box for styling nodes with categorization."""
-    
-    def __init__(self, style_type="content", parent=None):
-        super().__init__(parent)
-        self.style_type = style_type
-        self.setEditable(True)
-        self.setInsertPolicy(QComboBox.NoInsert)
-        
-    def update_styles(self, styling_data):
-        """Update the combo box with available styles."""
-        self.clear()
-        self.addItem("")  # Empty option
-        
-        if not styling_data:
-            return
-            
-        if self.style_type == "page" and "pageStyle" in styling_data:
-            for style in styling_data["pageStyle"]:
-                if "name" in style:
-                    self.addItem(style["name"])
-                    
-        elif self.style_type == "content" and "contentStyle" in styling_data:
-            for style in styling_data["contentStyle"]:
-                if "name" in style:
-                    self.addItem(style["name"])
-                    
-        elif self.style_type == "letter" and "letterStyle" in styling_data:
-            for style in styling_data["letterStyle"]:
-                if "name" in style:
-                    self.addItem(style["name"])
-
-
-class CellReorderDialog(QDialog):
-    """Dialog for reordering selected cells."""
-    
-    def __init__(self, cell_data, parent=None):
-        super().__init__(parent)
-        self.cell_data = cell_data
-        self.original_order = list(range(len(cell_data)))  # Keep track of original indices
-        self.init_ui()
-        
-    def init_ui(self):
-        """Initialize the dialog UI."""
-        self.setWindowTitle("Reorder Cells")
-        self.setModal(True)
-        self.resize(400, 300)
-        
-        layout = QVBoxLayout(self)
-        
-        # Instructions
-        instructions = QLabel("Drag and drop to reorder the selected cells:")
-        layout.addWidget(instructions)
-        
-        # List widget for reordering
-        self.list_widget = QListWidget()
-        self.list_widget.setDragDropMode(QAbstractItemView.InternalMove)
-        
-        # Populate list
-        for i, (row, col, value) in enumerate(self.cell_data):
-            item_text = f"Row {row+1}, Col {col+1}: {value}"
-            self.list_widget.addItem(item_text)
-            
-        layout.addWidget(self.list_widget)
-        
-        # Buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_reordered_data(self):
-        """Get the reordered cell data."""
-        reordered_data = []
-        for i in range(self.list_widget.count()):
-            original_index = self.original_order[i]  # Get the original index
-            reordered_data.append(self.cell_data[original_index])
-        return reordered_data
+from widgets.style_combobox import StyleComboBox
+from dialogs.reorder_dialog import CellReorderDialog
 
 
 class SpreadsheetWidget(QWidget):
-    """Enhanced spreadsheet widget with styling support and cell reordering."""
+    """
+    Enhanced spreadsheet widget with styling support, cell reordering, and undo/redo integration.
+    Designed for extensibility and accessibility.
+    """
     
     data_changed = pyqtSignal()
     selection_changed = pyqtSignal()
