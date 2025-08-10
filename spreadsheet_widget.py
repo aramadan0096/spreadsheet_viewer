@@ -6,10 +6,10 @@ import csv
 from PyQt5.QtWidgets import (
     QWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QHBoxLayout,
     QComboBox, QHeaderView, QAbstractItemView, QPushButton, QMessageBox,
-    QDialog, QListWidget, QDialogButtonBox, QLabel, QCheckBox
+    QDialog, QListWidget, QDialogButtonBox, QLabel, QCheckBox, QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
-from PyQt5.QtGui import QColor, QFont, QDrag, QPalette
+from PyQt5.QtGui import QColor, QFont, QDrag, QPalette, QClipboard
 from widgets.style_combobox import StyleComboBox
 from dialogs.reorder_dialog import CellReorderDialog
 
@@ -26,6 +26,8 @@ class SpreadsheetWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.styling_data = None
+        # Keep the first data row hidden in the viewer if present
+        self.hidden_first_row = None
         # Column definitions - only define static properties here
         self.special_columns = {
             '@Content Style': {'type': 'content', 'col': 4},
@@ -43,26 +45,33 @@ class SpreadsheetWidget(QWidget):
     def init_ui(self):
         """Initialize the widget UI."""
         layout = QVBoxLayout(self)
-        
+
         # Control panel
         control_panel = self.create_control_panel()
         layout.addWidget(control_panel)
-        
+
         # Create table widget
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        
+        # Keep rows compact
+        self.table.setWordWrap(False)
+        # Elide long text instead of expanding columns
+        self.table.setTextElideMode(Qt.ElideRight)
+
         # Enable drag and drop for reordering
         self.table.setDragDropMode(QAbstractItemView.InternalMove)
         self.table.setDefaultDropAction(Qt.MoveAction)
-        
+
         layout.addWidget(self.table)
-        
-        # Set initial size
+
+        # Set initial sizing behavior
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.verticalHeader().setDefaultSectionSize(30)
+        # Make rows a fixed, shorter height
+        self.table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        self.table.verticalHeader().setDefaultSectionSize(24)
+        self.table.verticalHeader().setMinimumSectionSize(20)
         
     def create_control_panel(self):
         """Create the control panel with action buttons."""
@@ -100,20 +109,23 @@ class SpreadsheetWidget(QWidget):
         self.table.blockSignals(True)
 
         try:
+            # Expect first row as headers; data follows
+            headers = csv_data[0]
+            data_rows = csv_data[1:] if len(csv_data) > 1 else []
+            # Per request: ignore the first data row in the viewer (but preserve it)
+            self.hidden_first_row = None
+            if data_rows:
+                print("Ignoring first data row in viewer")
+                self.hidden_first_row = data_rows[0]
+                data_rows = data_rows[1:]
             # Set table dimensions
-            self.table.setRowCount(len(csv_data))
-            self.table.setColumnCount(len(csv_data[0]) if csv_data else 0)
+            self.table.setRowCount(len(data_rows))
+            self.table.setColumnCount(len(headers))
             print(f"Set table dimensions: {len(csv_data)} rows x {len(csv_data[0]) if csv_data else 0} columns")
 
             # Set headers if first row contains headers
-            if csv_data and csv_data[0] and str(csv_data[0][0]).startswith('@'):
-                headers = csv_data[0]
-                print(f"Setting headers: {headers}")
-                self.table.setHorizontalHeaderLabels(headers)
-                data_rows = csv_data[1:]
-            else:
-                print("No headers found, using all rows as data")
-                data_rows = csv_data
+            print(f"Setting headers: {headers}")
+            self.table.setHorizontalHeaderLabels(headers)
 
             # Populate table
             print(f"Populating {len(data_rows)} data rows")
@@ -129,9 +141,13 @@ class SpreadsheetWidget(QWidget):
                             index = combo.findText(str(cell_value))
                             if index >= 0:
                                 combo.setCurrentIndex(index)
+                            combo.setToolTip(str(cell_value))
                             self.table.setCellWidget(row_idx, col_idx, combo)
                         else:
-                            item = QTableWidgetItem(str(cell_value))
+                            text = str(cell_value)
+                            item = QTableWidgetItem(text)
+                            # Show full text on hover when elided
+                            item.setToolTip(text)
                             self.table.setItem(row_idx, col_idx, item)
 
         except Exception as e:
@@ -141,8 +157,28 @@ class SpreadsheetWidget(QWidget):
             # Re-enable signals
             self.table.blockSignals(False)
 
-        # Resize columns to content
-        self.table.resizeColumnsToContents()
+        # Resize and clamp column sizes
+        self.adjust_column_sizes()
+
+    def adjust_column_sizes(self):
+        """Auto-size columns, then clamp @Body to a reasonable width."""
+        try:
+            self.table.resizeColumnsToContents()
+            # Find @Body column
+            body_index = -1
+            for col in range(self.table.columnCount()):
+                header_item = self.table.horizontalHeaderItem(col)
+                if header_item and header_item.text().strip() == '@Body':
+                    body_index = col
+                    break
+            if body_index >= 0:
+                from PyQt5.QtWidgets import QHeaderView as _QHV
+                header = self.table.horizontalHeader()
+                header.setSectionResizeMode(body_index, _QHV.Interactive)
+                max_width = 320  # clamp width for readability
+                self.table.setColumnWidth(body_index, max_width)
+        except Exception as e:
+            print(f"adjust_column_sizes error: {e}")
 
     def set_cell_value(self, row, col, value):
         """Set cell value with appropriate widget type."""
@@ -157,7 +193,9 @@ class SpreadsheetWidget(QWidget):
                 combo.setCurrentIndex(current_index)
             self.table.setCellWidget(row, col, combo)
         else:
-            item = QTableWidgetItem(str(value) if value is not None else "")
+            text = str(value) if value is not None else ""
+            item = QTableWidgetItem(text)
+            item.setToolTip(text)
             self.table.setItem(row, col, item)
 
     def create_style_combo(self, column_name):
@@ -224,14 +262,31 @@ class SpreadsheetWidget(QWidget):
                                 new_combo.setCurrentIndex(index)
                             self.table.setCellWidget(row, col, new_combo)
 
-    def get_csv_data(self):
-        """Get current table data as CSV-compatible list."""
+    def get_csv_data(self, include_headers: bool = True):
+        """Get current table data as CSV-compatible list.
+        By default includes the header row as the first row so downstream loaders
+        can treat headers properly and not display them as data.
+        """
         data = []
+
+        # Optionally include headers as the first row
+        if include_headers:
+            headers = []
+            for col in range(self.table.columnCount()):
+                header_item = self.table.horizontalHeaderItem(col)
+                headers.append(header_item.text() if header_item else "")
+            data.append(headers)
+
+        # Re-insert hidden first row (if any) right after headers
+        if include_headers and self.hidden_first_row is not None:
+            data.append([str(v) for v in self.hidden_first_row])
+
+        # Add table body rows
         for row in range(self.table.rowCount()):
             row_data = []
             for col in range(self.table.columnCount()):
                 widget = self.table.cellWidget(row, col)
-                if isinstance(widget, StyleComboBox):
+                if isinstance(widget, QComboBox):
                     row_data.append(widget.currentText())
                 else:
                     item = self.table.item(row, col)
@@ -263,10 +318,8 @@ class SpreadsheetWidget(QWidget):
         dialog = CellReorderDialog(cell_data, self)
         if dialog.exec_() == QDialog.Accepted:
             reordered = dialog.get_reordered_data()
-            # Apply the reordered values
-            for old_data, (row, col, _) in zip(reordered, cell_data):
-                old_row, old_col, value = old_data
-                # Set the cell value, preserving the widget type (combo or regular)
+            # Apply the reordered values according to new order
+            for (row, col, _), (_, _, value) in zip(cell_data, reordered):
                 self.set_cell_value(row, col, value)
                 
         self.data_changed.emit()
@@ -351,13 +404,65 @@ class SpreadsheetWidget(QWidget):
             self.table.removeColumn(col)
             
         self.data_changed.emit()
-        
+
     def clear_data(self):
         """Clear all table data."""
         self.table.clear()
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
         self.styling_data = None
+        self.hidden_first_row = None
+
+    # Clipboard operations
+    def copy(self):
+        selected = self.table.selectedIndexes()
+        if not selected:
+            return
+        # Group by rows
+        selected.sort(key=lambda x: (x.row(), x.column()))
+        rows = {}
+        for idx in selected:
+            rows.setdefault(idx.row(), {})[idx.column()] = idx
+        lines = []
+        for r in sorted(rows.keys()):
+            cols = rows[r]
+            line_vals = []
+            for c in sorted(cols.keys()):
+                idx = cols[c]
+                widget = self.table.cellWidget(idx.row(), idx.column())
+                if isinstance(widget, QComboBox):
+                    line_vals.append(widget.currentText())
+                else:
+                    item = self.table.item(idx.row(), idx.column())
+                    line_vals.append(item.text() if item else "")
+            lines.append("\t".join(line_vals))
+        QApplication.clipboard().setText("\n".join(lines), mode=QClipboard.Clipboard)
+
+    def cut(self):
+        self.copy()
+        # After copying, clear selected cells
+        for idx in self.table.selectedIndexes():
+            self.set_cell_value(idx.row(), idx.column(), "")
+        self.data_changed.emit()
+
+    def paste(self):
+        text = QApplication.clipboard().text(QClipboard.Clipboard)
+        if not text:
+            return
+        start_indexes = self.table.selectedIndexes()
+        if not start_indexes:
+            return
+        start_row = min(idx.row() for idx in start_indexes)
+        start_col = min(idx.column() for idx in start_indexes)
+        rows = text.splitlines()
+        for r, line in enumerate(rows):
+            values = line.split("\t")
+            for c, val in enumerate(values):
+                row = start_row + r
+                col = start_col + c
+                if row < self.table.rowCount() and col < self.table.columnCount():
+                    self.set_cell_value(row, col, val)
+        self.data_changed.emit()
         
     def create_new_project(self):
         """Create a new empty project structure."""

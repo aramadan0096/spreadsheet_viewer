@@ -1,4 +1,5 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QListWidget, QAbstractItemView, QDialogButtonBox
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QListWidget, QAbstractItemView, QDialogButtonBox, QListWidgetItem
+from PyQt5.QtCore import Qt
 
 class CellReorderDialog(QDialog):
     """Dialog for reordering selected cells."""
@@ -20,7 +21,9 @@ class CellReorderDialog(QDialog):
         self.list_widget.setDragDropMode(QAbstractItemView.InternalMove)
         for i, (row, col, value) in enumerate(self.cell_data):
             item_text = f"Row {row+1}, Col {col+1}: {value}"
-            self.list_widget.addItem(item_text)
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.UserRole, i)
+            self.list_widget.addItem(item)
         layout.addWidget(self.list_widget)
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
@@ -31,6 +34,7 @@ class CellReorderDialog(QDialog):
         """Get the reordered cell data."""
         reordered_data = []
         for i in range(self.list_widget.count()):
-            original_index = self.original_order[i]  # Get the original index
+            item = self.list_widget.item(i)
+            original_index = item.data(Qt.UserRole)
             reordered_data.append(self.cell_data[original_index])
         return reordered_data

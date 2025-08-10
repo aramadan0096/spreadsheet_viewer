@@ -1,11 +1,13 @@
 from PyQt5.QtWidgets import QMenuBar
 from PyQt5.QtGui import QKeySequence
 
+
 class MenuBar(QMenuBar):
     """
     Application menu bar for CredGen Spreadsheet Editor.
     Provides accessible actions with keyboard shortcuts and tooltips.
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.actions = {}
@@ -22,6 +24,7 @@ class MenuBar(QMenuBar):
         file_menu.addSeparator()
         self.actions['exit'] = file_menu.addAction('E&xit')
         self.actions['exit'].setShortcut(QKeySequence.Quit)
+
         # Edit menu
         edit_menu = self.addMenu('&Edit')
         self.actions['undo'] = edit_menu.addAction('&Undo')
@@ -35,12 +38,14 @@ class MenuBar(QMenuBar):
         self.actions['copy'].setShortcut(QKeySequence.Copy)
         self.actions['paste'] = edit_menu.addAction('&Paste')
         self.actions['paste'].setShortcut(QKeySequence.Paste)
+
         # Tools menu
         tools_menu = self.addMenu('&Tools')
         self.actions['reorder'] = tools_menu.addAction('&Reorder Selected Cells')
         self.actions['reorder'].setShortcut('Ctrl+R')
         self.actions['refresh_styling'] = tools_menu.addAction('Refresh &Styling Data')
         self.actions['refresh_styling'].setShortcut('F5')
+
         # Help menu
         help_menu = self.addMenu('&Help')
         self.actions['about'] = help_menu.addAction('&About')

@@ -56,7 +56,7 @@ class CredGenMainWindow(QMainWindow):
     def init_ui(self) -> None:
         """Initialize the user interface. (Accessibility: add tooltips, ensure tab order, and add keyboard shortcuts.)"""
         self.setWindowTitle("CredGen Spreadsheet Editor")
-        self.setGeometry(100, 100, 1400, 800)
+        self.setGeometry(100, 100, 1600, 900)
         self.setWindowIcon(QIcon("icons/app_icon.png"))
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -74,6 +74,7 @@ class CredGenMainWindow(QMainWindow):
         """Create the application menu bar. (Accessibility: keyboard shortcuts are set in MenuBar.)"""
         self.menubar = MenuBar(self)
         self.setMenuBar(self.menubar)
+        # Tooltips
         self.menubar.actions['open'].setToolTip("Open a CredGen project folder")
         self.menubar.actions['save'].setToolTip("Save the current project")
         self.menubar.actions['exit'].setToolTip("Exit the application")
@@ -85,7 +86,7 @@ class CredGenMainWindow(QMainWindow):
         self.menubar.actions['reorder'].setToolTip("Reorder selected cells")
         self.menubar.actions['refresh_styling'].setToolTip("Refresh styling data from TOML")
         self.menubar.actions['about'].setToolTip("About this application")
-        # Connect actions to methods
+        # Connections
         self.menubar.actions['open'].triggered.connect(self.open_project)
         self.menubar.actions['save'].triggered.connect(self.save_project)
         self.menubar.actions['exit'].triggered.connect(self.close)
@@ -131,22 +132,29 @@ class CredGenMainWindow(QMainWindow):
     def create_main_content(self, layout):
         """Create the main content area."""
         splitter = QSplitter(Qt.Horizontal)
-        
+
         # Create spreadsheet widget
         self.spreadsheet_widget = SpreadsheetWidget()
         if self.styling_data:
             self.spreadsheet_widget.update_styling_data(self.styling_data)
-            
+
         # Use InfoPanel widget
         self.info_panel = InfoPanel()
-        
+
+        # Prefer grid to expand more than info panel
+        from PyQt5.QtWidgets import QSizePolicy
+        self.spreadsheet_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.info_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+
         # Add widgets to splitter
         splitter.addWidget(self.spreadsheet_widget)
         splitter.addWidget(self.info_panel)
-        
-        # Set initial sizes
-        splitter.setSizes([800, 200])
-        
+
+        # Set initial sizes, bias toward the spreadsheet
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([1300, 300])
+
         layout.addWidget(splitter)
         
     def create_status_bar(self):
@@ -159,10 +167,13 @@ class CredGenMainWindow(QMainWindow):
         """Setup signal-slot connections."""
         self.spreadsheet_widget.data_changed.connect(self.on_data_changed)
         self.spreadsheet_widget.selection_changed.connect(self.on_selection_changed)
+        self.is_dirty = False
         
     def new_project(self):
         """Create a new project."""
         try:
+            if not self.maybe_discard_changes():
+                return
             self.spreadsheet_widget.clear_data()
             self.current_csv_file = None
             self.current_styling_file = None
@@ -172,6 +183,11 @@ class CredGenMainWindow(QMainWindow):
             
             self.status_bar.showMessage("New project created")
             self.update_window_title()
+            # Reset undo/redo and push initial state
+            self.controller.undo_stack.clear()
+            self.controller.redo_stack.clear()
+            self.controller.push_undo(self.spreadsheet_widget.get_csv_data())
+            self.is_dirty = False
             
             if self.styling_data:
                 self.spreadsheet_widget.update_styling_data(self.styling_data)
@@ -181,6 +197,8 @@ class CredGenMainWindow(QMainWindow):
             
     def open_project(self) -> None:
         """Open a project folder containing Credits.csv and Styling.toml files."""
+        if not self.maybe_discard_changes():
+            return
         folder_path = QFileDialog.getExistingDirectory(
             self,
             "Open Project Folder",
@@ -212,9 +230,15 @@ class CredGenMainWindow(QMainWindow):
                 self.styling_data = styling_data
                 self.spreadsheet_widget.update_styling_data(styling_data)
                 self.update_info_panel(styling_data)
+                # csv_data is expected to include headers as the first row
                 self.spreadsheet_widget.load_data(csv_data, styling_data)
                 self.update_window_title()
                 self.statusBar().showMessage(f"Loaded project from: {folder_path}")
+                # Reset undo/redo and push initial state
+                self.controller.undo_stack.clear()
+                self.controller.redo_stack.clear()
+                self.controller.push_undo(self.spreadsheet_widget.get_csv_data(include_headers=True))
+                self.is_dirty = False
             except ValueError as e:
                 QMessageBox.critical(self, "Error", str(e))
                 return
@@ -238,6 +262,7 @@ class CredGenMainWindow(QMainWindow):
                 styling_data = self.styling_data
                 
             # Update spreadsheet widget
+            # csv_data is expected to include headers as the first row
             self.spreadsheet_widget.load_data(csv_data, styling_data)
             
             # Update info panel
@@ -245,6 +270,11 @@ class CredGenMainWindow(QMainWindow):
             
             self.status_bar.showMessage(f"Loaded project: {os.path.basename(csv_file_path)}")
             self.update_window_title()
+            # Reset undo/redo and push initial state
+            self.controller.undo_stack.clear()
+            self.controller.redo_stack.clear()
+            self.controller.push_undo(self.spreadsheet_widget.get_csv_data(include_headers=True))
+            self.is_dirty = False
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load project: {str(e)}")
@@ -255,12 +285,13 @@ class CredGenMainWindow(QMainWindow):
             self.save_as_project()
             return
         try:
-            csv_data = self.spreadsheet_widget.get_csv_data()
+            csv_data = self.spreadsheet_widget.get_csv_data(include_headers=True)
             if not self.controller.validate_csv(csv_data):
                 QMessageBox.critical(self, "Error", "CSV data is invalid.")
                 return
             self.controller.save_project(self.current_csv_file, csv_data)
             self.status_bar.showMessage("Project saved successfully")
+            self.is_dirty = False
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save project: {str(e)}")
             
@@ -274,7 +305,7 @@ class CredGenMainWindow(QMainWindow):
             )
             if not file_path:
                 return
-            csv_data = self.spreadsheet_widget.get_csv_data()
+            csv_data = self.spreadsheet_widget.get_csv_data(include_headers=True)
             if not self.controller.validate_csv(csv_data):
                 QMessageBox.critical(self, "Error", "CSV data is invalid.")
                 return
@@ -282,6 +313,7 @@ class CredGenMainWindow(QMainWindow):
             self.current_csv_file = file_path
             self.status_bar.showMessage("Project saved successfully")
             self.update_window_title()
+            self.is_dirty = False
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save project: {str(e)}")
             
@@ -338,9 +370,10 @@ class CredGenMainWindow(QMainWindow):
     def on_data_changed(self) -> None:
         """Handle data change in spreadsheet."""
         # Push new state to undo stack
-        state = self.spreadsheet_widget.get_csv_data()
+        state = self.spreadsheet_widget.get_csv_data(include_headers=True)
         self.controller.push_undo(state)
         self.status_bar.showMessage("Data modified")
+        self.is_dirty = True
         
     def on_selection_changed(self):
         """Handle selection change in spreadsheet."""
@@ -374,8 +407,28 @@ class CredGenMainWindow(QMainWindow):
         
     def closeEvent(self, event):
         """Handle application close event."""
-        # TODO: Check for unsaved changes
-        event.accept()
+        if self.maybe_discard_changes():
+            event.accept()
+        else:
+            event.ignore()
+
+    def maybe_discard_changes(self) -> bool:
+        """Prompt to save changes if there are unsaved modifications."""
+        if not getattr(self, 'is_dirty', False):
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Unsaved Changes",
+            "You have unsaved changes. Do you want to save them?",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
+        )
+        if reply == QMessageBox.Save:
+            self.save_project()
+            return not self.is_dirty  # If save succeeded, is_dirty will be False
+        if reply == QMessageBox.Discard:
+            return True
+        return False
 
 
 def main():

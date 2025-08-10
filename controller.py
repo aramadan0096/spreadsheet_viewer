@@ -55,20 +55,22 @@ class CredGenController:
         return True
 
     def push_undo(self, state: list) -> None:
-        """
-        Push a state to the undo stack.
-        """
-        self.undo_stack.append(state)
+        """Push a state to the undo stack."""
+        # Store a shallow copy to avoid accidental external mutation
+        self.undo_stack.append([row[:] for row in state])
+        # Any new action invalidates the redo stack
         self.redo_stack.clear()
 
     def undo(self) -> Optional[list]:
         """
         Undo last action and return previous state.
         """
-        if self.undo_stack:
-            state = self.undo_stack.pop()
-            self.redo_stack.append(state)
-            return state
+        # Need at least two states to go back: current and previous
+        if len(self.undo_stack) >= 2:
+            current = self.undo_stack.pop()
+            self.redo_stack.append(current)
+            previous = self.undo_stack[-1]
+            return [row[:] for row in previous]
         return None
 
     def redo(self) -> Optional[list]:
@@ -77,8 +79,8 @@ class CredGenController:
         """
         if self.redo_stack:
             state = self.redo_stack.pop()
-            self.undo_stack.append(state)
-            return state
+            self.undo_stack.append([row[:] for row in state])
+            return [row[:] for row in state]
         return None
 
     # Extensibility: plugin/config pattern for new style types
